@@ -19,7 +19,6 @@
     "desktop:preview": "npm run build && electron .",
     "desktop:build": "npm run build && electron-builder --config electron-builder.yml --publish never",
     "desktop:win": "npm run build && electron-builder --win --config electron-builder.yml --publish never",
-    "desktop:mac": "npm run build && electron-builder --mac --config electron-builder.yml --publish never",
     "desktop:linux": "npm run build && electron-builder --linux --config electron-builder.yml --publish never"
   },
   "dependencies": {

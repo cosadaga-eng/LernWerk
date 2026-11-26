@@ -48,44 +48,6 @@ jobs:
           path: release/*.exe
           if-no-files-found: error
 
-  build-macos:
-    name: macOS Installer
-    runs-on: macos-latest
-    env:
-      CSC_IDENTITY_AUTO_DISCOVERY: "false"
-    steps:
-      - name: Repository auschecken
-        uses: actions/checkout@v6
-
-      - name: Node.js einrichten
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-
-      - name: Abhängigkeiten installieren
-        shell: bash
-        run: |
-          if [ -f package-lock.json ]; then
-            npm ci --no-audit --no-fund || npm install --no-audit --no-fund --legacy-peer-deps
-          else
-            npm install --no-audit --no-fund --legacy-peer-deps
-          fi
-
-      - name: Web-Bundle bauen
-        shell: bash
-        run: npm run build
-
-      - name: Desktop-Installer erstellen
-        shell: bash
-        run: npx --no-install electron-builder --mac --config electron-builder.yml --publish never
-
-      - name: Installer als Artefakt hochladen
-        uses: actions/upload-artifact@v6
-        with:
-          name: LernWerk-macOS-Installer
-          path: release/*.dmg
-          if-no-files-found: error
-
   build-linux:
     name: Linux Installer
     runs-on: ubuntu-latest
@@ -132,6 +94,5 @@ jobs:
         with:
           files: |
             release/*.exe
-            release/*.dmg
             release/*.AppImage
             release/*.deb
