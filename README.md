@@ -1,11 +1,20 @@
-<div align="center">
+# LernWerk
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+100 % offline nutzbare Lernkarten-, Notebook-, Arbeitsblatt- und Multiple-Choice-App für Vokabeln, MINT-Formeln, Medizin, Wirtschaft, Studium und Allgemeinwissen. Alle Daten bleiben lokal im Browser (IndexedDB).
 
-  <h1>Built with AI Studio</h2>
+## Lokal starten
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+```bash
+npm install
+npm run dev
+```
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+## Auf GitHub Pages veröffentlichen
 
-</div>
+Die App verwendet relative Asset-Pfade (`base: './'`) und enthält bereits den fertigen Workflow unter `.github/workflows/deploy.yml`:
+
+1. Projekt in ein GitHub-Repository pushen (Branch `main` oder `master`).
+2. Im Repository unter **Settings → Pages → Build and deployment → Source** die Option **GitHub Actions** auswählen.
+3. Nach dem automatischen Workflow-Lauf (oder manuell über **Actions → GitHub Pages Deployment → Run workflow**) ist die App direkt unter `https://<dein-name>.github.io/<repo-name>/` erreichbar.
+
+Alternativ lässt sich mit `npm run build` der statische `dist/`-Ordner bauen und direkt auf jeden statischen Webspace oder Branch (`gh-pages`) hochladen.

@@ -1,0 +1,6 @@
+{
+  "name": "VokabelWerk",
+  "description": "100% offline und algorithmischer Vokabeltrainer für Deutsch–Spanisch und Deutsch–Englisch mit zufälligen 50er-Paketen, Karteikarten, Multiple-Choice sowie CSV-, Word- und PDF-Import.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

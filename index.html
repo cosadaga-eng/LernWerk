@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#F5F6F4" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="LernWerk" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <link rel="icon" type="image/svg+xml" href="./icon.svg" />
+    <title>LernWerk — Offline-Lernkarten, Notebooks &amp; Quiz-Studio</title>
+    <meta
+      name="description"
+      content="100% offline Lernkarten-, Notebook- und Arbeitsblatt-App für Sprachen, MINT-Formeln, Medizin, Wirtschaft, Studium und Allgemeinwissen mit CSV-, Word- und PDF-Import."
+    />
+    <meta property="og:title" content="LernWerk — Offline-Lernkarten, Notebooks &amp; Quiz-Studio" />
+    <meta
+      property="og:description"
+      content="100% offline Lernkarten-, Notebook- und Arbeitsblatt-App für Sprachen, MINT-Formeln, Medizin, Wirtschaft, Studium und Allgemeinwissen mit CSV-, Word- und PDF-Import."
+    />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <script>
+      (function () {
+        try {
+          if (localStorage.getItem("vokabelwerk-theme") === "dark") {
+            document.documentElement.classList.add("dark");
+            var meta = document.querySelector('meta[name="theme-color"]');
+            if (meta) meta.setAttribute("content", "#0E1116");
+          }
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body class="bg-[#F5F6F4] dark:bg-[#0E1116] text-slate-900 dark:text-slate-100 antialiased selection:bg-sky-100 selection:text-sky-900 dark:selection:bg-sky-900/60 dark:selection:text-sky-100">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
