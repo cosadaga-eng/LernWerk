@@ -30,10 +30,9 @@ jobs:
       - name: Abhängigkeiten installieren
         run: |
           if (Test-Path package-lock.json) {
-            npm ci --no-audit --no-fund
-          } else {
-            npm install --no-audit --no-fund --legacy-peer-deps
+            Remove-Item package-lock.json -Force
           }
+          npm install --include=optional --legacy-peer-deps
 
       - name: Web-Bundle bauen
         run: npm run build
@@ -65,11 +64,8 @@ jobs:
       - name: Abhängigkeiten installieren
         shell: bash
         run: |
-          if [ -f package-lock.json ]; then
-            npm ci --no-audit --no-fund || npm install --no-audit --no-fund --legacy-peer-deps
-          else
-            npm install --no-audit --no-fund --legacy-peer-deps
-          fi
+          rm -f package-lock.json
+          npm install --include=optional --legacy-peer-deps
 
       - name: Web-Bundle bauen
         shell: bash
