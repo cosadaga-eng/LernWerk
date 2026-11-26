@@ -1,0 +1,55 @@
+appId: com.lernwerk.app
+productName: LernWerk
+copyright: Copyright © 2026 LernWerk
+asar: true
+directories:
+  output: release
+files:
+  - dist/**/*
+  - electron/**/*
+  - public/pwa-512x512.png
+  - package.json
+  - "!node_modules/**/*"
+win:
+  icon: public/pwa-512x512.png
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: LernWerk
+  artifactName: LernWerk-Setup-${version}-Windows.${ext}
+portable:
+  artifactName: LernWerk-Portable-${version}-Windows.${ext}
+mac:
+  icon: public/pwa-512x512.png
+  category: public.app-category.education
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  artifactName: LernWerk-${version}-macOS-${arch}.${ext}
+linux:
+  icon: public/pwa-512x512.png
+  category: Education
+  maintainer: LernWerk <app@lernwerk.local>
+  syncDesktopName: true
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
+  artifactName: LernWerk-${version}-Linux-${arch}.${ext}
+deb:
+  compression: gz
