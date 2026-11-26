@@ -27,10 +27,12 @@ import {
   generateCsvTemplate,
   parseCsvContent,
 } from "../utils/csvParser";
+import { extractNotebookTextItems } from "../utils/notebookExtractor";
 import {
   parsePdfOffline,
   parseWordDocxOffline,
 } from "../utils/offlineDocParser";
+import { convertExtractedItemsToTasks } from "../utils/textSanitizer";
 import {
   expandDraftsWithBidirectional,
   OrganizedPackagePlan,
@@ -304,7 +306,7 @@ export function ImportStudio({
     parsed: CsvParseResult,
     mapping: typeof csvMapping
   ): ImportedVocabDraft[] => {
-    return parsed.rows
+    const raw = parsed.rows
       .map((row, idx) => {
         const term = (row[mapping.termCol] || "").trim();
         const translation = (row[mapping.translationCol] || "").trim();
@@ -322,6 +324,10 @@ export function ImportStudio({
         };
       })
       .filter((d) => d.term || d.translation);
+
+    return selectedSubject === "sprachen"
+      ? raw
+      : convertExtractedItemsToTasks(raw);
   };
 
   const handleCsvInput = (text: string, overrideGroupName?: string) => {
@@ -341,10 +347,50 @@ export function ImportStudio({
     const freshGroupId = makeNewGroupId();
     setPendingGroupId(freshGroupId);
     const parsed = parseCsvContent(text);
+    const csvDrafts = buildDraftsFromCsv(parsed, parsed.detectedMapping);
+    const validCsvPairs = csvDrafts.filter(
+      (d) => d.term.trim() && d.translation.trim() && d.term !== d.translation
+    );
+
+    const lines = text.split(/\r?\n/).filter((l) => l.trim());
+    const looksTabular =
+      lines.filter((l) => l.includes(";") || l.includes("\t")).length >=
+      Math.max(2, Math.floor(lines.length * 0.45));
+
+    if (!looksTabular && parsed.headers.length <= 2) {
+      const smartItems = extractNotebookTextItems(
+        text,
+        overrideGroupName || effectiveListName
+      );
+      if (smartItems.length > validCsvPairs.length || validCsvPairs.length === 0) {
+        setCsvParsed(null);
+        const smartDrafts: ImportedVocabDraft[] = smartItems.map((item, idx) => ({
+          id: `text-${Date.now()}-${idx}`,
+          term: item.term.trim(),
+          translation: item.translation.trim(),
+          partOfSpeech: item.partOfSpeech || "",
+          phonetic: item.phonetic || "",
+          exampleSentence: item.exampleSentence || "",
+          note: item.note || "",
+          packageId: 0,
+          selected: Boolean(item.term && item.translation),
+        }));
+        processDraftsPipeline(smartDrafts, {
+          consolidate: consolidateDuplicates,
+          nameForGroup: overrideGroupName || effectiveListName,
+          groupId: freshGroupId,
+          subject: selectedSubject,
+        });
+        setExtractionMethod(
+          "Intelligente Text-, Aufgaben- & Störzeichenanalyse"
+        );
+        return;
+      }
+    }
+
     setCsvParsed(parsed);
     setCsvMapping(parsed.detectedMapping);
-    const rawDrafts = buildDraftsFromCsv(parsed, parsed.detectedMapping);
-    processDraftsPipeline(rawDrafts, {
+    processDraftsPipeline(csvDrafts, {
       consolidate: consolidateDuplicates,
       nameForGroup: overrideGroupName || effectiveListName,
       groupId: freshGroupId,
@@ -387,7 +433,8 @@ export function ImportStudio({
     if (
       lower.endsWith(".csv") ||
       lower.endsWith(".tsv") ||
-      lower.endsWith(".txt")
+      lower.endsWith(".txt") ||
+      lower.endsWith(".md")
     ) {
       setFormat("csv");
       try {

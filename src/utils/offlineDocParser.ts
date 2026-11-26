@@ -1,6 +1,15 @@
 import mammoth from "mammoth/mammoth.browser.js";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import {
+  classifySectionDivider,
+  cleanCardField,
+  cleanNonLetterNoise,
+  convertExtractedItemsToTasks,
+  extractProseTaskFromSentence,
+  isBoilerplateOrUnimportant,
+  isDividerOrSeparatorLine,
+} from "./textSanitizer";
 
 if (
   typeof window !== "undefined" &&
@@ -65,26 +74,39 @@ export function normalizeInlineSupSub(input: string): string {
 }
 
 function isHeaderRow(colA: string, colB: string): boolean {
-  const combined = `${colA} ${colB}`.toLowerCase();
+  const a = colA.trim().toLowerCase();
+  const b = colB.trim().toLowerCase();
+  if (!a || !b) return false;
+  // Real table/CSV header cells are short labels, never full questions or sentences
+  if (
+    a.length > 32 ||
+    b.length > 32 ||
+    a.split(/\s+/).length > 4 ||
+    b.split(/\s+/).length > 4 ||
+    /[?!.]/.test(a) ||
+    /[?!.]/.test(b)
+  ) {
+    return false;
+  }
   const leftHeader =
-    /^(vokabel|begriff|wort|term|word|front|vorderseite|quelle|source|lernsprache|fremdwort|frage|question|stichwort|konzept|aufgabe|nr\.?)$/.test(
-      colA.trim().toLowerCase()
+    /^(?:vokabel|begriff|wort|term|word|front|vorderseite|quelle|source|lernsprache|fremdwort|frage|question|stichwort|konzept|aufgabe|nr\.?)$/.test(
+      a
     );
   const rightHeader =
-    /^(übersetzung|uebersetzung|bedeutung|translation|back|rückseite|rueckseite|ziel|target|deutsch|antwort|answer|erklärung|erklaerung|definition|lösung|loesung|formel|ergebnis)$/.test(
-      colB.trim().toLowerCase()
+    /^(?:übersetzung|uebersetzung|bedeutung|translation|back|rückseite|rueckseite|ziel|target|deutsch|antwort|answer|erklärung|erklaerung|definition|lösung|loesung|formel|ergebnis)$/.test(
+      b
     );
   if (leftHeader && rightHeader) return true;
   return (
-    /(vokabel|begriff|term|word|frage|vorderseite|aufgabe)/.test(combined) &&
-    /(übersetzung|uebersetzung|translation|bedeutung|antwort|erklärung|definition|rückseite|lösung)/.test(
-      combined
+    /\b(?:vokabel|begriff|term|word|frage|vorderseite|aufgabe)\b/.test(a) &&
+    /\b(?:übersetzung|uebersetzung|translation|bedeutung|antwort|erklärung|definition|rückseite|lösung)\b/.test(
+      b
     )
   );
 }
 
 function cleanText(val: string): string {
-  return normalizeInlineSupSub(val)
+  const htmlCleaned = normalizeInlineSupSub(val)
     .replace(/<br\s*\/?>/gi, " ")
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/g, " ")
@@ -92,33 +114,16 @@ function cleanText(val: string): string {
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\u00a0/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+    .replace(/&#39;/g, "'");
+  return cleanNonLetterNoise(htmlCleaned, {
+    preserveClozeBlanks: true,
+    preserveHeadingHashes: false,
+    preserveInternalPipe: false,
+  });
 }
 
 function isWorksheetMetaLine(line: string): boolean {
-  const trimmed = line.trim();
-  if (!trimmed) return true;
-  if (
-    /^(?:name|vorname|nachname|datum|klasse|kurs|fach|lehrer|lehrkraft|punkte|note|bewertung|unterschrift|arbeitsblatt(?:\s+nr\.?\s*\d*)?)\s*[:_.\-–]*\s*(?:_{2,}|\.{3,}|\/.*)?$/i.test(
-      trimmed
-    )
-  ) {
-    return true;
-  }
-  const metaFields = trimmed.match(
-    /\b(?:name|vorname|nachname|datum|klasse|kurs|fach|lehrer|lehrkraft|punkte|note|bewertung|unterschrift)\s*:/gi
-  );
-  if (metaFields && (metaFields.length >= 2 || /_{2,}|\.{3,}/.test(trimmed))) {
-    return true;
-  }
-  if (/^[_\-.\s]{4,}$/.test(trimmed)) return true;
-  if (/^(?:seite|page)\s+\d+(?:\s*(?:von|\/)\s*\d+)?$/i.test(trimmed)) {
-    return true;
-  }
-  return false;
+  return isBoilerplateOrUnimportant(line);
 }
 
 function stripTrailingFillBlanks(text: string): string {
@@ -130,7 +135,14 @@ function stripTrailingFillBlanks(text: string): string {
 
 function extractSectionHeading(rawLine: string): string | null {
   const line = rawLine.trim();
-  if (!line || line.length > 90) return null;
+  if (!line || line.length > 100) return null;
+
+  const classified = classifySectionDivider(line);
+  if (classified) {
+    if (classified.type === "topic") return classified.topic;
+    return null;
+  }
+
   if (isWorksheetMetaLine(line) || /^\d+$/.test(line)) return null;
 
   // Decorated headings: === Reisen ===, --- Essen ---, ## Thema
@@ -138,7 +150,7 @@ function extractSectionHeading(rawLine: string): string | null {
     /^(?:[=\-#*]{1,6}\s*)(.+?)(?:\s*[=\-#*]{1,6})?$/
   );
   if (decorated && /^[=\-#*]/.test(line)) {
-    const inner = decorated[1].trim();
+    const inner = cleanCardField(decorated[1]);
     if (inner.length >= 2 && inner.length <= 70 && !/[;|\t]/.test(inner)) {
       return inner;
     }
@@ -149,19 +161,10 @@ function extractSectionHeading(rawLine: string): string | null {
     /^(?:thema|topic|kapitel|chapter|lektion|lesson|unit|modul|module|bereich|abschnitt|kategorie|category|sachgebiet|teil|arbeitsblatt)\s*(?:\d+[a-z]?|[ivx]+)?\s*[:\-–—.]\s*(.+)$/i
   );
   if (prefixed && prefixed[1]) {
-    const candidate = prefixed[1].trim();
+    const candidate = cleanCardField(prefixed[1]);
     if (candidate.length >= 2 && candidate.length <= 70) {
       return candidate;
     }
-  }
-
-  // Standalone chapter/unit title like "Kapitel 1" or "Thema 2"
-  if (
-    /^(?:thema|topic|kapitel|chapter|lektion|lesson|unit|modul|module)\s+(?:\d+[a-z]?|[ivx]+)$/i.test(
-      line
-    )
-  ) {
-    return line;
   }
 
   return null;
@@ -221,6 +224,7 @@ function parseDocxHtmlStructured(html: string): {
   const unansweredRows: AlgorithmicExtractedRow[] = [];
   let hasTables = false;
   let currentTopic: string | undefined;
+  let inIgnoredSection = false;
 
   const blockRegex = /<(h[1-6]|p|tr)[^>]*>([\s\S]*?)<\/\1>/gi;
   let match: RegExpExecArray | null;
@@ -231,7 +235,16 @@ function parseDocxHtmlStructured(html: string): {
 
     if (tag.startsWith("h")) {
       const headingText = cleanText(innerHtml);
-      const extracted = extractSectionHeading(headingText) || headingText;
+      const divider = classifySectionDivider(headingText);
+      if (divider?.type === "ignore-section") {
+        inIgnoredSection = true;
+        continue;
+      }
+      inIgnoredSection = false;
+      if (divider?.type === "divider") {
+        continue;
+      }
+      const extracted = extractSectionHeading(headingText) || cleanCardField(headingText);
       if (extracted && extracted.length >= 2 && extracted.length <= 70) {
         currentTopic = extracted;
       }
@@ -240,6 +253,22 @@ function parseDocxHtmlStructured(html: string): {
 
     if (tag === "p") {
       const text = cleanText(innerHtml);
+      const divider = classifySectionDivider(text);
+      if (divider?.type === "ignore-section") {
+        inIgnoredSection = true;
+        continue;
+      }
+      if (divider?.type === "topic") {
+        inIgnoredSection = false;
+        currentTopic = divider.topic;
+        continue;
+      }
+      if (divider?.type === "divider") {
+        inIgnoredSection = false;
+        continue;
+      }
+      if (inIgnoredSection || isDividerOrSeparatorLine(text)) continue;
+
       const explicit = extractSectionHeading(text);
       if (explicit) {
         currentTopic = explicit;
@@ -251,33 +280,47 @@ function parseDocxHtmlStructured(html: string): {
         isBoldOnly &&
         text.length >= 3 &&
         text.length <= 55 &&
-        !/[;|\t—–]/.test(text)
+        !/[;|\t—–]/.test(text) &&
+        !isWorksheetMetaLine(text)
       ) {
-        currentTopic = text;
+        currentTopic = cleanCardField(text);
       }
       continue;
     }
 
     if (tag === "tr") {
       hasTables = true;
+      if (inIgnoredSection) continue;
       const cellMatches = innerHtml.match(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi);
       if (!cellMatches) continue;
 
       if (cellMatches.length === 1) {
         const single = cleanText(cellMatches[0]);
-        if (single && single.length <= 65 && !isWorksheetMetaLine(single)) {
-          currentTopic = extractSectionHeading(single) || single;
+        const divider = classifySectionDivider(single);
+        if (divider?.type === "topic") {
+          currentTopic = divider.topic;
+        } else if (
+          divider?.type !== "divider" &&
+          divider?.type !== "ignore-section" &&
+          single &&
+          single.length <= 65 &&
+          !isWorksheetMetaLine(single) &&
+          !isDividerOrSeparatorLine(single)
+        ) {
+          currentTopic = extractSectionHeading(single) || cleanCardField(single);
         }
         continue;
       }
 
       const cells = cellMatches.map((c) => cleanText(c));
-      const term = stripTrailingFillBlanks(cells[0] || "");
-      const translation = stripTrailingFillBlanks(cells[1] || "");
-      if (!term || isWorksheetMetaLine(term)) continue;
+      const term = cleanCardField(stripTrailingFillBlanks(cells[0] || ""));
+      const translation = cleanCardField(stripTrailingFillBlanks(cells[1] || ""));
+      if (!term || isWorksheetMetaLine(term) || isDividerOrSeparatorLine(term)) {
+        continue;
+      }
       if (isHeaderRow(term, translation || "antwort")) continue;
 
-      if (!translation) {
+      if (!translation || isDividerOrSeparatorLine(translation)) {
         if (term.length >= 4 && !/^\d+[.)]?$/.test(term)) {
           unansweredRows.push({
             term,
@@ -288,9 +331,9 @@ function parseDocxHtmlStructured(html: string): {
         continue;
       }
 
-      const exampleSentence = cells[2] || "";
-      const note = cells[3] || cells[4] || "";
-      const rowTopic = cells[5] || currentTopic;
+      const exampleSentence = cleanCardField(cells[2] || "");
+      const note = cleanCardField(cells[3] || cells[4] || "");
+      const rowTopic = cleanCardField(cells[5] || "") || currentTopic;
 
       rows.push({
         term,
@@ -302,7 +345,11 @@ function parseDocxHtmlStructured(html: string): {
     }
   }
 
-  return { tableRows: rows, unansweredTableRows: unansweredRows, hasTables };
+  return {
+    tableRows: convertExtractedItemsToTasks(rows),
+    unansweredTableRows: unansweredRows,
+    hasTables,
+  };
 }
 
 const DELIMITERS = [
@@ -379,17 +426,46 @@ function parseDelimitedLines(
   rawText: string,
   initialTopic?: string
 ): AlgorithmicExtractedRow[] {
-  const lines = rawText
+  const rawLines = rawText
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean);
 
   const parsed: AlgorithmicExtractedRow[] = [];
   let currentTopic = initialTopic;
+  let inIgnoredSection = false;
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (isWorksheetMetaLine(line)) continue;
+  for (let i = 0; i < rawLines.length; i++) {
+    const rawLine = rawLines[i];
+    const divider = classifySectionDivider(rawLine);
+    if (divider) {
+      if (divider.type === "ignore-section") {
+        inIgnoredSection = true;
+      } else {
+        inIgnoredSection = false;
+        if (divider.topic) currentTopic = divider.topic;
+      }
+      continue;
+    }
+
+    if (inIgnoredSection) {
+      const maybeNewHeading = extractSectionHeading(rawLine);
+      if (maybeNewHeading) {
+        inIgnoredSection = false;
+        currentTopic = maybeNewHeading;
+      }
+      continue;
+    }
+
+    if (isDividerOrSeparatorLine(rawLine)) continue;
+
+    const line = cleanNonLetterNoise(rawLine, {
+      preserveClozeBlanks: true,
+      preserveHeadingHashes: true,
+      preserveInternalPipe: true,
+      preserveLeadingBullet: true,
+    });
+    if (!line || isWorksheetMetaLine(line)) continue;
 
     const section = extractSectionHeading(line);
     if (section) {
@@ -399,13 +475,14 @@ function parseDelimitedLines(
 
     const pair = splitDelimitedLine(line);
     if (!pair) {
-      const cleanHeading = line.replace(/^\d{1,2}[.)]\s+/, "").trim();
+      const cleanHeading = cleanCardField(line.replace(/^\d{1,2}[.)]\s+/, ""));
       if (
         cleanHeading.length >= 3 &&
         cleanHeading.length <= 45 &&
         cleanHeading.split(/\s+/).length <= 5 &&
         !/[.!?]$/.test(cleanHeading) &&
         !isWorksheetMetaLine(cleanHeading) &&
+        !isDividerOrSeparatorLine(cleanHeading) &&
         !/^\d+$/.test(cleanHeading)
       ) {
         currentTopic = cleanHeading;
@@ -413,13 +490,24 @@ function parseDelimitedLines(
       continue;
     }
 
-    if (isHeaderRow(pair.term, pair.translation)) continue;
+    const cleanTerm = cleanCardField(pair.term);
+    const cleanTrans = cleanCardField(pair.translation);
+    if (!cleanTerm || !cleanTrans) continue;
+    if (isHeaderRow(cleanTerm, cleanTrans)) continue;
+    if (
+      isDividerOrSeparatorLine(cleanTerm) ||
+      isDividerOrSeparatorLine(cleanTrans)
+    ) {
+      continue;
+    }
+
     parsed.push({
-      ...pair,
+      term: cleanTerm,
+      translation: cleanTrans,
       topic: currentTopic,
     });
   }
-  return parsed;
+  return convertExtractedItemsToTasks(parsed);
 }
 
 function isLikelyHeadingLine(line: string): string | null {
@@ -522,13 +610,12 @@ function matchWorksheetTaskLine(
   }
 
   const numbered = line.match(/^(\d{1,2}[a-z]?)[.)]\s+(.+)$/i);
-  if (numbered) {
+  if (numbered && !parseClozeLine(line)) {
     const body = stripTrailingFillBlanks(numbered[2]);
     if (
       body.length >= 6 &&
       (body.endsWith("?") ||
         WORKSHEET_TASK_VERBS.test(body) ||
-        /_{3,}|\[\.\.\.\]/.test(body) ||
         /^(?:was|wie|warum|weshalb|welche|welcher|welches|wofür|woraus|wodurch|wann|wo)\b/i.test(
           body
         ))
@@ -561,8 +648,10 @@ function parseClozeLine(
   const withoutBlanks = line.replace(/[_\s.\[\]()]+/g, "");
   if (withoutBlanks.length < 8) return null;
 
+  const bodyForCloze = line.replace(/^\d{1,2}[a-z]?[.)]\s+/i, "").trim();
+
   // Check inline solution: "Sentence with _____ (Solution)" or "-> Solution"
-  const arrowSol = line.match(
+  const arrowSol = bodyForCloze.match(
     /^(.+?(?:_{3,}|\[\.\.\.\]|\(\s*_{2,}\s*\)).*?)\s*(?:->|→|=>|\/\/)\s*(.+)$/
   );
   if (arrowSol && arrowSol[2].trim().length >= 1) {
@@ -572,7 +661,7 @@ function parseClozeLine(
     };
   }
 
-  const parenSol = line.match(
+  const parenSol = bodyForCloze.match(
     /^(.+?(?:_{3,}|\[\.\.\.\]).*?)\s*\((?:lösung\s*:\s*)?([^()]{2,80})\)\.?$/i
   );
   if (parenSol && !/^_{2,}$/.test(parenSol[2].trim())) {
@@ -583,7 +672,7 @@ function parseClozeLine(
   }
 
   return {
-    prompt: `Lückentext: ${line.trim()}`,
+    prompt: `Lückentext: ${bodyForCloze}`,
     answer: "(Lösung noch ergänzen)",
   };
 }
@@ -632,18 +721,29 @@ export function extractProseStudyCards(
   const normalized = normalizeInlineSupSub(rawText).replace(/\r\n/g, "\n").trim();
   if (!normalized) return [];
 
-  const lines = normalized.split("\n").map((l) => l.trim());
+  const rawLines = normalized.split("\n").map((l) => l.trim());
+  const lines = rawLines.map((raw) => {
+    if (!raw) return "";
+    if (isDividerOrSeparatorLine(raw)) return raw;
+    return cleanNonLetterNoise(raw, {
+      preserveClozeBlanks: true,
+      preserveHeadingHashes: true,
+      preserveInternalPipe: true,
+      preserveLeadingBullet: true,
+    });
+  });
+
   const solutionsMap = parseSolutionsSection(lines);
 
   const results: AlgorithmicExtractedRow[] = [];
   const seen = new Set<string>();
 
   const pushCard = (row: AlgorithmicExtractedRow) => {
-    const term = row.term.trim();
-    const translation = row.translation.trim();
+    const term = cleanCardField(row.term);
+    const translation = cleanCardField(row.translation);
     if (!term || !translation || term.length < 2 || translation.length < 2) return;
     if (isHeaderRow(term, translation)) return;
-    if (isWorksheetMetaLine(term)) return;
+    if (isWorksheetMetaLine(term) || isDividerOrSeparatorLine(term)) return;
     const key = `${term.toLowerCase()}:::${translation.toLowerCase()}`;
     if (seen.has(key)) return;
     seen.add(key);
@@ -651,19 +751,21 @@ export function extractProseStudyCards(
       ...row,
       term,
       translation,
-      topic: row.topic || defaultTopic,
+      topic: row.topic ? cleanCardField(row.topic) : defaultTopic,
     });
   };
 
   let currentTopic = defaultTopic;
   let pendingBulletHeading: string | null = null;
   let pendingBullets: string[] = [];
+  let inIgnoredSection = false;
 
   const flushBullets = () => {
     if (pendingBulletHeading && pendingBullets.length >= 2) {
       pushCard({
         term: pendingBulletHeading,
-        translation: pendingBullets.slice(0, 6).join(" • "),
+        translation: pendingBullets.slice(0, 6).join(", "),
+        partOfSpeech: "Aufzählung",
         topic: currentTopic || pendingBulletHeading,
       });
     }
@@ -672,6 +774,7 @@ export function extractProseStudyCards(
   };
 
   for (let i = 0; i < lines.length; i++) {
+    const rawLine = rawLines[i];
     const line = lines[i];
     if (!line) {
       flushBullets();
@@ -682,6 +785,41 @@ export function extractProseStudyCards(
       // Stop main pass once the trailing solutions key begins
       flushBullets();
       break;
+    }
+
+    // Check section dividers & meta sections BEFORE stripping separators
+    const divider = classifySectionDivider(rawLine) || classifySectionDivider(line);
+    if (divider) {
+      flushBullets();
+      if (divider.type === "ignore-section") {
+        inIgnoredSection = true;
+        pendingBulletHeading = null;
+        continue;
+      }
+      inIgnoredSection = false;
+      if (divider.type === "topic") {
+        currentTopic = divider.topic;
+        pendingBulletHeading = divider.topic;
+      } else {
+        pendingBulletHeading = null;
+      }
+      continue;
+    }
+
+    if (inIgnoredSection) {
+      const maybeHeading = extractSectionHeading(rawLine) || extractSectionHeading(line);
+      if (maybeHeading) {
+        inIgnoredSection = false;
+        currentTopic = maybeHeading;
+        pendingBulletHeading = maybeHeading;
+      }
+      continue;
+    }
+
+    if (isDividerOrSeparatorLine(rawLine) || isDividerOrSeparatorLine(line)) {
+      flushBullets();
+      pendingBulletHeading = null;
+      continue;
     }
 
     if (isWorksheetMetaLine(line)) {
@@ -698,8 +836,10 @@ export function extractProseStudyCards(
         calloutMatch[1].charAt(0).toUpperCase() +
         calloutMatch[1].slice(1).toLowerCase();
       const body = calloutMatch[2].trim();
-      const bodyDef = extractDefinitionFromSentence(body);
-      const bodyDelim = splitDelimitedLine(body);
+      const isFormulaCallout =
+        label.toLowerCase() === "formel" && body.includes("=");
+      const bodyDef = isFormulaCallout ? null : extractDefinitionFromSentence(body);
+      const bodyDelim = isFormulaCallout ? null : splitDelimitedLine(body);
       if (bodyDef) {
         pushCard({
           term: bodyDef.term,
@@ -707,14 +847,18 @@ export function extractProseStudyCards(
           partOfSpeech: label,
           topic: currentTopic,
         });
-      } else if (bodyDelim && bodyDelim.term.split(/\s+/).length <= 6) {
+      } else if (
+        bodyDelim &&
+        bodyDelim.term.length >= 2 &&
+        bodyDelim.term.split(/\s+/).length <= 6
+      ) {
         pushCard({
           term: bodyDelim.term,
           translation: bodyDelim.translation,
           partOfSpeech: label,
           topic: currentTopic,
         });
-      } else if (body.length >= 8) {
+      } else if (body.length >= 4) {
         pushCard({
           term: currentTopic ? `${label}: ${currentTopic}` : label,
           translation: body,
@@ -902,11 +1046,33 @@ export function extractProseStudyCards(
         continue;
       }
       if (
+        !pendingBulletHeading ||
+        bulletBody.split(/\s+/).length >= 6 ||
+        /[.!?]$/.test(bulletBody)
+      ) {
+        const proseInBullet = extractProseTaskFromSentence(
+          bulletBody,
+          currentTopic
+        );
+        if (proseInBullet) {
+          flushBullets();
+          pushCard({
+            term: proseInBullet.term,
+            translation: proseInBullet.translation,
+            topic: currentTopic,
+          });
+          continue;
+        }
+      }
+      if (
         pendingBulletHeading &&
         bulletBody.length >= 3 &&
-        bulletBody.length <= 160
+        bulletBody.length <= 160 &&
+        !isBoilerplateOrUnimportant(bulletBody) &&
+        !isDividerOrSeparatorLine(bulletBody)
       ) {
-        pendingBullets.push(bulletBody);
+        const cleanBullet = cleanCardField(bulletBody);
+        if (cleanBullet) pendingBullets.push(cleanBullet);
         continue;
       }
     }
@@ -915,8 +1081,9 @@ export function extractProseStudyCards(
     const heading = isLikelyHeadingLine(line);
     if (heading && !splitDelimitedLine(line)) {
       flushBullets();
-      currentTopic = heading;
-      pendingBulletHeading = heading;
+      const cleanHeading = cleanCardField(heading);
+      currentTopic = cleanHeading;
+      pendingBulletHeading = cleanHeading;
       continue;
     }
 
@@ -938,12 +1105,24 @@ export function extractProseStudyCards(
       }
     }
 
-    // 7. Prose definition sentences inside paragraphs
+    // 7. Important prose facts & definition sentences -> convert directly into active study tasks
     const sentences = line
       .split(/(?<=[.!?])\s+/)
       .map((s) => s.trim())
       .filter(Boolean);
     for (const sentence of sentences) {
+      if (isBoilerplateOrUnimportant(sentence)) continue;
+
+      const proseTask = extractProseTaskFromSentence(sentence, currentTopic);
+      if (proseTask) {
+        pushCard({
+          term: proseTask.term,
+          translation: proseTask.translation,
+          topic: currentTopic,
+        });
+        continue;
+      }
+
       const def = extractDefinitionFromSentence(sentence);
       if (def) {
         pushCard({
@@ -956,7 +1135,7 @@ export function extractProseStudyCards(
   }
 
   flushBullets();
-  return results;
+  return convertExtractedItemsToTasks(results);
 }
 
 /**
@@ -1181,9 +1360,20 @@ function reconstructPdfRowText(rowSpans: PdfTextSpan[]): {
 
   if (currentSeg.trim()) segments.push(currentSeg.trim());
 
+  const cleanLine = cleanNonLetterNoise(lineStr, {
+    preserveClozeBlanks: true,
+    preserveHeadingHashes: true,
+    preserveInternalPipe: true,
+    preserveLeadingBullet: true,
+  });
+
+  const cleanedSegments = segments
+    .map((seg) => cleanCardField(seg))
+    .filter((seg) => seg.length > 0 && !isDividerOrSeparatorLine(seg));
+
   return {
-    cleanLine: lineStr.trim(),
-    segments,
+    cleanLine,
+    segments: cleanedSegments,
   };
 }
 
@@ -1201,6 +1391,7 @@ export async function extractPdfRawOffline(
   const allLinesText: string[] = [];
   const columnCandidateRows: AlgorithmicExtractedRow[] = [];
   let currentPdfTopic: string | undefined;
+  let inIgnoredSection = false;
 
   for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
     const page = await pdf.getPage(pageNum);
@@ -1320,7 +1511,28 @@ export async function extractPdfRawOffline(
 
     for (const bucket of allBuckets) {
       const { cleanLine, segments } = reconstructPdfRowText(bucket.spans);
-      if (cleanLine) allLinesText.push(cleanLine);
+      if (!cleanLine || isDividerOrSeparatorLine(cleanLine)) continue;
+      allLinesText.push(cleanLine);
+
+      const divider = classifySectionDivider(cleanLine);
+      if (divider) {
+        if (divider.type === "ignore-section") {
+          inIgnoredSection = true;
+        } else {
+          inIgnoredSection = false;
+          if (divider.topic) currentPdfTopic = divider.topic;
+        }
+        continue;
+      }
+
+      if (inIgnoredSection) {
+        const nextHeading = extractSectionHeading(cleanLine);
+        if (nextHeading) {
+          inIgnoredSection = false;
+          currentPdfTopic = nextHeading;
+        }
+        continue;
+      }
 
       if (isWorksheetMetaLine(cleanLine)) continue;
 
@@ -1343,6 +1555,7 @@ export async function extractPdfRawOffline(
           single.split(/\s+/).length <= 5 &&
           !/[.!?]$/.test(single) &&
           !isWorksheetMetaLine(single) &&
+          !isDividerOrSeparatorLine(single) &&
           !/^\d+$/.test(single) &&
           !splitDelimitedLine(single)
         ) {
@@ -1352,8 +1565,8 @@ export async function extractPdfRawOffline(
       }
 
       if (nonEmptySegs.length >= 2) {
-        const colA = stripTrailingFillBlanks(nonEmptySegs[0]);
-        const colB = stripTrailingFillBlanks(nonEmptySegs[1]);
+        const colA = cleanCardField(stripTrailingFillBlanks(nonEmptySegs[0]));
+        const colB = cleanCardField(stripTrailingFillBlanks(nonEmptySegs[1]));
         if (
           colA &&
           colB &&
@@ -1361,9 +1574,11 @@ export async function extractPdfRawOffline(
           colB.length <= 240 &&
           !/^\d+$/.test(colA) &&
           !isWorksheetMetaLine(colA) &&
+          !isDividerOrSeparatorLine(colA) &&
+          !isDividerOrSeparatorLine(colB) &&
           !isHeaderRow(colA, colB)
         ) {
-          const exampleSentence = nonEmptySegs[2] || "";
+          const exampleSentence = cleanCardField(nonEmptySegs[2] || "");
           columnCandidateRows.push({
             term: colA,
             translation: colB,
@@ -1380,7 +1595,7 @@ export async function extractPdfRawOffline(
 
   return {
     rawText,
-    columnItems: columnCandidateRows,
+    columnItems: convertExtractedItemsToTasks(columnCandidateRows),
     delimitedItems,
   };
 }

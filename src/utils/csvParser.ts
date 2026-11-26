@@ -1,4 +1,10 @@
 import Papa from "papaparse";
+import {
+  classifySectionDivider,
+  cleanCardField,
+  isBoilerplateOrUnimportant,
+  isDividerOrSeparatorLine,
+} from "./textSanitizer";
 
 export interface CsvParseResult {
   headers: string[];
@@ -20,13 +26,28 @@ function matchColumn(header: string, patterns: RegExp[]): boolean {
 }
 
 export function parseCsvContent(content: string): CsvParseResult {
-  const result = Papa.parse<string[]>(content.trim(), {
+  const preFilteredContent = content
+    .trim()
+    .split(/\r?\n/)
+    .filter((rawLine) => {
+      const trimmed = rawLine.trim();
+      if (!trimmed) return false;
+      // Filter pure symbol dividers (including "---;---" or "===;===") and section divider banners
+      const withoutDelim = trimmed.replace(/[;\t,|]/g, "").trim();
+      if (!withoutDelim || isDividerOrSeparatorLine(withoutDelim)) return false;
+      if (isDividerOrSeparatorLine(trimmed)) return false;
+      if (classifySectionDivider(trimmed)) return false;
+      return true;
+    })
+    .join("\n");
+
+  const result = Papa.parse<string[]>(preFilteredContent, {
     skipEmptyLines: "greedy",
   });
 
-  const rawRows = (result.data || []).map((row) =>
-    row.map((cell) => (cell ?? "").toString().trim())
-  );
+  const rawRows = (result.data || [])
+    .map((row) => row.map((cell) => cleanCardField((cell ?? "").toString())))
+    .filter((row) => row.some((cell) => cell.length > 0));
 
   if (rawRows.length === 0) {
     return {
@@ -48,16 +69,37 @@ export function parseCsvContent(content: string): CsvParseResult {
   const colCount = Math.max(...rawRows.map((r) => r.length));
 
   // If all rows landed in a single column (e.g. "Begriff - Erklärung" or "Frage = Antwort"),
-  // split them cleanly on common study-note delimiters.
+  // filter dividers/boilerplate and split valid lines on common study-note delimiters.
   if (colCount === 1) {
-    const splitDelims = [" — ", " – ", " - ", " = ", " -> ", " → ", " : ", ": "];
+    const splitDelims = [
+      "\t",
+      " — ",
+      " – ",
+      " - ",
+      " = ",
+      " -> ",
+      " → ",
+      " : ",
+      ": ",
+      ";",
+    ];
     const expanded = rawRows
+      .filter((r) => {
+        const line = r[0] || "";
+        if (!line) return false;
+        if (isDividerOrSeparatorLine(line)) return false;
+        if (classifySectionDivider(line)) return false;
+        if (isBoilerplateOrUnimportant(line)) return false;
+        return true;
+      })
       .map((r) => {
         const line = r[0] || "";
         for (const sep of splitDelims) {
           const idx = line.indexOf(sep);
           if (idx > 0 && idx < line.length - sep.length) {
-            return [line.slice(0, idx).trim(), line.slice(idx + sep.length).trim()];
+            const left = cleanCardField(line.slice(0, idx));
+            const right = cleanCardField(line.slice(idx + sep.length));
+            if (left && right) return [left, right];
           }
         }
         return [line];
@@ -76,7 +118,15 @@ export function parseCsvContent(content: string): CsvParseResult {
       const hasHeader =
         matchColumn(fRow[0] || "", termPatterns) ||
         matchColumn(fRow[1] || "", transPatterns);
-      const dataRows = hasHeader ? expanded.slice(1) : expanded;
+      const dataRows = (hasHeader ? expanded.slice(1) : expanded).filter(
+        (r) =>
+          r.length >= 2 &&
+          r[0] &&
+          r[1] &&
+          !isDividerOrSeparatorLine(r[0]) &&
+          !isDividerOrSeparatorLine(r[1]) &&
+          !isBoilerplateOrUnimportant(r[0])
+      );
       return {
         headers: hasHeader ? fRow : ["Begriff / Frage", "Antwort / Erklärung"],
         rows: dataRows,
@@ -124,11 +174,23 @@ export function parseCsvContent(content: string): CsvParseResult {
     ? firstRow
     : Array.from({ length: colCount }, (_, i) => `Spalte ${i + 1}`);
 
-  const dataRows = hasHeaderRow ? rawRows.slice(1) : rawRows;
+  const dataRows = (hasHeaderRow ? rawRows.slice(1) : rawRows).filter((r) => {
+    if (!r.some((cell) => cell.length > 0)) return false;
+    const t = r[termCol] || "";
+    const a = r[translationCol] || "";
+    if (!t || isDividerOrSeparatorLine(t)) return false;
+    if (colCount > 1 && termCol !== translationCol && (!a || isDividerOrSeparatorLine(a))) {
+      return false;
+    }
+    if (classifySectionDivider(t) || isBoilerplateOrUnimportant(t)) {
+      return false;
+    }
+    return true;
+  });
 
   return {
     headers,
-    rows: dataRows.filter((r) => r.some((cell) => cell.length > 0)),
+    rows: dataRows,
     detectedMapping: {
       termCol,
       translationCol,

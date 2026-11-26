@@ -1,8 +1,10 @@
 node_modules/
 build/
 dist/
+dev-dist/
 release/
 coverage/
+bun.lock
 .DS_Store
 *.log
 .env*

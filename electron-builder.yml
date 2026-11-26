@@ -2,6 +2,9 @@ appId: com.lernwerk.app
 productName: LernWerk
 copyright: Copyright © 2026 LernWerk
 asar: true
+npmRebuild: false
+buildDependenciesFromSource: false
+publish: null
 directories:
   output: release
 files:
@@ -12,6 +15,7 @@ files:
   - "!node_modules/**/*"
 win:
   icon: public/pwa-512x512.png
+  signExecutable: false
   target:
     - target: nsis
       arch:
@@ -32,12 +36,18 @@ portable:
 mac:
   icon: public/pwa-512x512.png
   category: public.app-category.education
+  identity: null
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  notarize: false
   target:
     - target: dmg
       arch:
         - x64
         - arm64
   artifactName: LernWerk-${version}-macOS-${arch}.${ext}
+dmg:
+  sign: false
 linux:
   icon: public/pwa-512x512.png
   category: Education

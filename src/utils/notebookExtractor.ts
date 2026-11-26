@@ -6,6 +6,7 @@ import {
   extractWordRawOffline,
   normalizeInlineSupSub,
 } from "./offlineDocParser";
+import { cleanCardField, convertExtractedItemsToTasks } from "./textSanitizer";
 
 export interface NotebookSourceParseResult {
   title: string;
@@ -127,15 +128,19 @@ export async function parseNotebookSourceFile(
     const parsed = parseCsvContent(rawText);
     const { termCol, translationCol, exampleCol, noteCol, posCol } =
       parsed.detectedMapping;
-    const csvItems: ExtractedSourceItem[] = parsed.rows
-      .map((row) => ({
-        term: (row[termCol] || "").trim(),
-        translation: (row[translationCol] || "").trim(),
-        exampleSentence: exampleCol >= 0 ? (row[exampleCol] || "").trim() : undefined,
-        note: noteCol >= 0 ? (row[noteCol] || "").trim() : undefined,
-        partOfSpeech: posCol >= 0 ? (row[posCol] || "").trim() : undefined,
-      }))
-      .filter((item) => item.term && item.translation);
+    const csvItems: ExtractedSourceItem[] = convertExtractedItemsToTasks(
+      parsed.rows
+        .map((row) => ({
+          term: cleanCardField(row[termCol] || ""),
+          translation: cleanCardField(row[translationCol] || ""),
+          exampleSentence:
+            exampleCol >= 0 ? cleanCardField(row[exampleCol] || "") : undefined,
+          note: noteCol >= 0 ? cleanCardField(row[noteCol] || "") : undefined,
+          partOfSpeech:
+            posCol >= 0 ? cleanCardField(row[posCol] || "") : undefined,
+        }))
+        .filter((item) => item.term && item.translation)
+    );
 
     const extractedItems =
       csvItems.length > 0 ? csvItems : extractProseStudyCards(rawText);
@@ -186,16 +191,20 @@ export function extractNotebookTextItems(
     const parsed = parseCsvContent(trimmed);
     const { termCol, translationCol, exampleCol, noteCol, posCol } =
       parsed.detectedMapping;
-    csvItems = parsed.rows
-      .map((row) => ({
-        term: (row[termCol] || "").trim(),
-        translation: (row[translationCol] || "").trim(),
-        exampleSentence: exampleCol >= 0 ? (row[exampleCol] || "").trim() : undefined,
-        note: noteCol >= 0 ? (row[noteCol] || "").trim() : undefined,
-        partOfSpeech: posCol >= 0 ? (row[posCol] || "").trim() : undefined,
-        topic: defaultTopic,
-      }))
-      .filter((i) => i.term && i.translation);
+    csvItems = convertExtractedItemsToTasks(
+      parsed.rows
+        .map((row) => ({
+          term: cleanCardField(row[termCol] || ""),
+          translation: cleanCardField(row[translationCol] || ""),
+          exampleSentence:
+            exampleCol >= 0 ? cleanCardField(row[exampleCol] || "") : undefined,
+          note: noteCol >= 0 ? cleanCardField(row[noteCol] || "") : undefined,
+          partOfSpeech:
+            posCol >= 0 ? cleanCardField(row[posCol] || "") : undefined,
+          topic: defaultTopic,
+        }))
+        .filter((i) => i.term && i.translation)
+    );
   }
 
   const proseItems = extractProseStudyCards(trimmed, defaultTopic);
