@@ -30,6 +30,9 @@ jobs:
             script: desktop:linux
             artifact: LernWerk-Linux-Installer
 
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
     steps:
       - name: Repository auschecken
         uses: actions/checkout@v4
@@ -38,10 +41,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
 
       - name: Abhängigkeiten installieren
-        run: npm ci
+        shell: bash
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+          else
+            npm install --no-audit --no-fund
+          fi
 
       - name: Desktop-Installer erstellen
         run: npm run ${{ matrix.script }}
