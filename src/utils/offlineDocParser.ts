@@ -108,7 +108,7 @@ function isHeaderRow(colA: string, colB: string): boolean {
 function cleanText(val: string): string {
   const htmlCleaned = normalizeInlineSupSub(val)
     .replace(/<br\s*\/?>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
+    .replace(/<(?!\/?(?:sup|sub)\b)[^>]+>/gi, " ")
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
